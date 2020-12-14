@@ -5,6 +5,7 @@ import shutil
 import sys
 import subprocess
 
+from setuptools import find_packages
 from setuptools.command.build_ext import build_ext
 from distutils.core import setup, Extension
 from distutils import log as logger
@@ -65,9 +66,10 @@ ext_type = Extension(
 setup(
     name="hvloop",
     version="0.0.1",
-    description="libhv python wrapper",
+    description="asyncio event loop base on libhv",
+    url="https://github.com/xiispace/hvloop",
     license="MIT License",
-    auth="xiispace",
+    author="xiispace",
     author_email="xiispace@163.com",
     classifiers=[
         'Development Status :: 1 - Planning',
@@ -85,5 +87,6 @@ setup(
         "build_ext": hvloop_build_ext
     },
     python_requires=">=3.5",
+    include_package_data=True,
     ext_modules=cythonize([ext_type], compiler_directives={'language_level': "3"})
 )

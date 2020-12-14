@@ -1,0 +1,3 @@
+include *.rst
+recursive-include hvloop *.pyx *.pxd *.pxi *.py *.c *.h
+recursive-include vendor/libhv *
