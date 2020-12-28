@@ -58,7 +58,7 @@ class hvloop_build_ext(build_ext):
 ext_type = Extension(
     "hvloop.loop",
     sources=["hvloop/loop.pyx"],
-    language="c++",
+    language="c",
     define_macros=[('HV_STATICLIB', '1'), ],
 )
 

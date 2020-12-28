@@ -1,10 +1,12 @@
 # cython: language_level=3, embedsignature=True
+import os
+import sys
 import asyncio
 import concurrent.futures
 import collections
-import time
 import traceback
 import socket
+import itertools
 
 cimport cython
 from cython.operator cimport dereference as deref
@@ -13,15 +15,20 @@ from libc.string cimport memset
 from cpython cimport PyObject
 from cpython cimport (
     Py_INCREF, Py_DECREF, Py_XDECREF, Py_XINCREF,
-    PyBytes_AS_STRING, Py_SIZE
+    PyBytes_AS_STRING, Py_SIZE, PyThread_get_thread_ident
 )
 
 from .includes.python cimport (
     PY_VERSION_HEX,
     PyMem_RawMalloc,
+    PyMem_RawFree,
     PyUnicode_FromString
 )
 
+cdef os_environ = os.environ
+cdef os_name = os.name
+cdef sys_platform = sys.platform
+cdef sys_ignore_environment = sys.flags.ignore_environment
 cdef tb_format_list = traceback.format_list
 cdef aio_logger = asyncio.log.logger
 cdef aio_Future = asyncio.Future
@@ -30,11 +37,25 @@ cdef aio_ensure_future = asyncio.ensure_future
 cdef aio_isfuture = asyncio.isfuture
 cdef aio_Handle = asyncio.Handle
 cdef aio_wrap_future = asyncio.wrap_future
+cdef aio_gather = asyncio.gather
 cdef aio_set_running_loop = asyncio._set_running_loop
 cdef aio_get_running_loop = asyncio._get_running_loop
 cdef cc_ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor
+cdef future_set_result_unless_cancelled = asyncio.futures._set_result_unless_cancelled
+
+cdef int has_IPV6_V6ONLY = hasattr(socket, 'IPV6_V6ONLY')
+cdef int IPV6_V6ONLY = getattr(socket, 'IPV6_V6ONLY', -1)
+cdef int has_SO_REUSEPORT = hasattr(socket, 'SO_REUSEPORT')
+cdef int SO_REUSEPORT = getattr(socket, 'SO_REUSEPORT', 0)
 cdef socket_getaddrinfo = socket.getaddrinfo
 cdef socket_getnameinfo = socket.getnameinfo
+cdef socket_socket = socket.socket
+cdef socket_error = socket_error
+
+cdef col_deque = collections.deque
+cdef col_Iterable = collections.abc.Iterable
+
+cdef chain_from_iterable = itertools.chain.from_iterable
 
 
 cdef:
@@ -45,10 +66,8 @@ cdef:
 
 
 cdef void on_idle(hv.hidle_t* idle) with gil:
-    # print("on_idle: event_id=%s\tpriority=%d\t" % ((<hv.hevent_t*>idle).event_id, (<hv.hevent_t*>idle).priority))
     cdef:
         Loop loop = <Loop> (<hv.hevent_t*>idle).userdata
-    # print("ready num: %d" % len(loop._ready))
     ntodo = len(loop._ready)
     for i in range(ntodo):
         handle = loop._ready.popleft()
@@ -64,27 +83,57 @@ cdef void on_idle(hv.hidle_t* idle) with gil:
 
 @cython.no_gc_clear
 cdef class Loop:
+    """
+    https://www.python.org/dev/peps/pep-3156/#event-loop-methods-overview
+    """
 
     def __cinit__(self):
         self.hvloop = hv.hloop_new(0)
 
+        self._debug = 0
+        self._thread_id = 0
+        self._closed = 0
+        self._stopping = 0
+
         self._timers = set()
-        self._ready = collections.deque()
+
+        self._task_factory = None
+        self._exception_handler = None
+        self._default_executor = None
+        self._ready = col_deque()
+
+    def __init__(self):
+        self.set_debug((not sys_ignore_environment
+                        and bool(os_environ.get('PYTHONASYNCIODEBUG'))))
 
     def __dealloc__(self):
+        if self._closed == 0:
+            aio_logger.warning("unclosed event loop")
+            # not self.is_running()
+            if self._thread_id != 0:
+                self.close()
+
         hv.hloop_free(&self.hvloop)
 
+    def __repr__(self):
+        return '<{} running={} closed={} debug={}>'.format(
+            self.__class__.__name__, self.is_running(), self.is_closed(), self.get_debug()
+        )
+
+    # starting, stopping and closing
     cdef _run(self, int flags):
         Py_INCREF(self)
         aio_set_running_loop(self)
+        self._thread_id = PyThread_get_thread_ident()
 
         with nogil:
             err = hv.hloop_run(self.hvloop)
         Py_DECREF(self)
+
+        self._stopping = 0
+        self._thread_id = 0
         if err < 0:
             raise ValueError("loop run error")
-
-    # starting, stopping and closing
 
     def run_forever(self):
         cdef hv.hidle_t* idle
@@ -138,20 +187,34 @@ cdef class Loop:
         self._stopping = 1
 
     def is_running(self):
-        return (self._thread_id is not None)
+        return (self._thread_id != 0)
 
     def close(self):
-        """
+        """Close the event loop.
 
-        :return:
+        This clears the queues and shuts down the executor,
+        but does not wait for the executor to finish.
+
+        The event loop must not be running.
         """
-        pass
+        if self.is_running():
+            raise RuntimeError("Cannot close a running event loop")
+        if self._closed:
+            return
+        if self._debug:
+            aio_logger.debug("Close %r", self)
+        self._closed = 1
+        self._ready.clear()
+        # self._scheduled.clear()
+        executor = self._default_executor
+        if executor is not None:
+            self._default_executor = None
+            executor.shutdown(wait=False)
 
     def is_closed(self):
-        pass
+        return self._closed
 
     # basic and timed callbacks
-
     def call_soon(self, callback, *args, context=None):
         handle = self._call_soon(callback, args, context)
         return handle
@@ -167,19 +230,23 @@ cdef class Loop:
             delay = 0
         if not args:
             args = None
-        when = <uint64_t>round(delay * 1000)
+        # s -> ms
+        when = <uint32_t>round(delay * 1000)
         return TimerHandle(self, callback, args, when, context)
 
     def call_at(self, when, callback, *args, context=None):
         return self.call_later(when - self.time(), callback, *args, context=context)
 
-    def time(self):
+    cdef uint64_t _time(self):
         hv.hloop_update_time(self.hvloop)
-        return hv.hloop_now_us(self.hvloop) / 1000
+        return hv.hloop_now_us(self.hvloop)
+
+    def time(self):
+        return self._time() / 1000
 
     # thread interaction
     def call_soon_threadsafe(self, callback, *args, context=None):
-        # todo:
+        # todo: check
         handle = self._call_soon(callback, args, context)
         return handle
 
@@ -197,12 +264,21 @@ cdef class Loop:
         self._default_executor = executor
 
     # internet name lookups
+    cdef _make_socket_transport(self, int sock, protocol, waiter, extra, server):
+        cdef hv.hio_t* hio = hv.hio_get(self.hvloop, sock)
+        return self._make_hio_transport(hio, protocol, waiter, extra, server)
+
+    cdef _make_hio_transport(self, hv.hio_t* hio, protocol, waiter, extra, server):
+        tr = HVSocketTransport(self, protocol, waiter, extra, server)
+        tr._init_hio(hio)
+        tr._on_connect()
+        return tr
+
     @cython.iterable_coroutine
     async def getaddrinfo(self, host, port, *,
                           family=0, type=0, proto=0, flags=0):
-        getaddr_func = socket_getaddrinfo
         return await self.run_in_executor(
-            None, getaddr_func, host, port, family, type, proto, flags
+            None, socket_getaddrinfo, host, port, family, type, proto, flags
         )
 
     @cython.iterable_coroutine
@@ -220,38 +296,155 @@ cdef class Loop:
             local_addr=None, server_hostname=None,
             ssl_handshake_timeout=None,
             happy_eyeballs_delay=None, interleave=None):
-        """
-        """
+        protocol = protocol_factory()
+        waiter = self.create_future()
+        if ssl:
+            raise ValueError("not support now")
 
         if host is not None and port is not None:
+            try:
+                host = host.encode('ascii')
+            except UnicodeError:
+                host = host.encode('idna')
+            try:
+                transport = HVSocketTransport.connect(
+                    self, host, port, protocol, waiter, None, None
+                )
+                # transport.connect(host, port)
+                await waiter
+            except:
+                aio_logger.error("transport connect error")
+                # transport.close()
+                raise
             pass
-
         else:
             if sock is None:
                 raise ValueError('host and port was not specified and no sock specified')
-            # if sock.type != soc
-        protocol = protocol_factory()
-        waiter = self.create_future()
-
-        transport = HVSocketTransport(
-            self, protocol, None, waiter
-        )
-        try:
-            host = host.encode('ascii')
-        except UnicodeError:
-            host = host.encode('idna')
-        try:
-            transport.connect(host, port)
+            transport = self._make_socket_transport(sock.fileno(), protocol, waiter, None, None)
             await waiter
-        except:
-            aio_logger.error("transport connect error")
-            transport.close()
-            raise
+
         return transport, protocol
 
 
-    def create_server(self):
-        pass
+    async def create_server(
+            self, protocol_factory, host=None, port=None,
+            *,
+            family=socket.AF_UNSPEC,
+            flags=socket.AI_PASSIVE,
+            sock=None,
+            backlog=100,
+            ssl=None,
+            reuse_address=None,
+            reuse_port=None,
+            ssl_handshake_timeout=None,
+            start_serving=True):
+        """Create a TCP server.
+
+        The host parameter can be a string, in that case the TCP server is
+        bound to host and port.
+
+        The host parameter can also be a sequence of strings and in that case
+        the TCP server is bound to all hosts of the sequence. If a host
+        appears multiple times (possibly indirectly e.g. when hostnames
+        resolve to the same IP address), the server is only bound once to that
+        host.
+
+        Return a Server object which can be used to stop the service.
+
+        This method is a coroutine.
+        """
+        if isinstance(ssl, bool):
+            raise TypeError('ssl argument must be an SSLContext or None')
+
+        if ssl_handshake_timeout is not None and ssl is None:
+            raise ValueError(
+                'ssl_handshake_timeout is only meaningful with ssl')
+
+        if host is not None or port is not None:
+            if sock is not None:
+                raise ValueError(
+                    'host/port and sock can not be specified at the same time')
+
+            if reuse_address is None:
+                reuse_address = os_name == 'posix' and sys_platform != 'cygwin'
+
+            if reuse_port and not has_SO_REUSEPORT:
+                raise ValueError('reuse_port not supported by socket module')
+
+            sockets = []
+            if host == '':
+                hosts = [None]
+            elif (isinstance(host, str) or
+                  not isinstance(host, col_Iterable)):
+                hosts = [host]
+            else:
+                hosts = host
+
+            fs = [self.getaddrinfo(host, port, family=family, type=hv.SOCK_STREAM, flags=flags)
+                  for host in hosts]
+            infos = await aio_gather(*fs, loop=self)
+            infos = set(chain_from_iterable(infos))
+
+            completed = False
+            try:
+                for res in infos:
+                    af, socktype, proto, canonname, sa = res
+                    try:
+                        sock = socket_socket(af, socktype, proto)
+                    except socket.error:
+                        # Assume it's a bad family/type/protocol combination.
+                        if self._debug:
+                            aio_logger.warning('create_server() failed to create '
+                                           'socket.socket(%r, %r, %r)',
+                                           af, socktype, proto, exc_info=True)
+                        continue
+                    sockets.append(sock)
+                    if reuse_address:
+                        sock.setsockopt(
+                            hv.SOL_SOCKET, hv.SO_REUSEADDR, True)
+                    if reuse_port:
+                        sock.setsockopt(hv.SOL_SOCKET, SO_REUSEPORT, 1)
+                    # Disable IPv4/IPv6 dual stack support (enabled by
+                    # default on Linux) which makes a single socket
+                    # listen on both address families.
+                    if af == hv.AF_INET6 and has_IPV6_V6ONLY:
+
+                        sock.setsockopt(hv.IPPROTO_IPV6,
+                                        IPV6_V6ONLY,
+                                        True)
+                    try:
+                        sock.bind(sa)
+                    except OSError as err:
+                        raise OSError(err.errno, 'error while attempting '
+                                      'to bind on address %r: %s'
+                                      % (sa, err.strerror.lower())) from None
+                completed = True
+            finally:
+                if not completed:
+                    for sock in sockets:
+                        sock.close()
+        else:
+            if sock is None:
+                raise ValueError('Neither host/port nor sock were specified')
+            if sock.type != socket.SOCK_STREAM:
+                raise ValueError(f'A Stream Socket was expected, got {sock!r}')
+            sockets = [sock]
+
+        for sock in sockets:
+            sock.setblocking(False)
+
+        server = Server(self, sockets, protocol_factory,
+                        ssl, backlog, ssl_handshake_timeout)
+
+        if start_serving:
+            server._start_serving()
+            # Skip one loop iteration so that all 'loop.add_reader'
+            # go through.
+            # await tasks.sleep(0, loop=self)
+
+        if self._debug:
+            aio_logger.info("%r is serving", server)
+        return server
 
     def create_datagram_endpoint(self):
         pass
@@ -371,419 +564,7 @@ cdef class Loop:
             pass
 
 
-
-cdef void on_timer(hv.htimer_t* timer) with gil:
-    cdef:
-        TimerHandle handle = <TimerHandle> (<hv.hevent_t*>timer).userdata
-    handle._run()
-
-
-@cython.no_gc_clear
-@cython.freelist(250)
-cdef class TimerHandle:
-    def __cinit__(self, Loop loop, object callback, object args,
-                  uint64_t delay, object context):
-
-        self.loop = loop
-        self.callback = callback
-        self.args = args
-        self._cancelled = 0
-
-        if PY37:
-            pass
-            # if context is None:
-            #     context = Context_CopyCurrent()
-            # self.context = context
-        else:
-            if context is not None:
-                raise NotImplementedError(
-                    '"context" argument requires Python 3.7')
-            self.context = None
-
-        self._debug_info = None
-
-        # self.timer = UVTimer.new(
-        #     loop, <method_t>self._run, self, delay)
-        self.timer = hv.htimer_add(self.loop.hvloop, on_timer, delay, 1)
-        hv.hevent_set_userdata(<hv.hevent_t*>self.timer, <void*>self)
-
-
-
-        # self.timer.start()
-
-        # Only add to loop._timers when `self.timer` is successfully created
-        # add self ref to disable self and self.callback release
-        loop._timers.add(self)
-
-    property _source_traceback:
-        def __get__(self):
-            if self._debug_info is not None:
-                return self._debug_info[1]
-
-    def __dealloc__(self):
-        if not self.timer == NULL:
-            raise RuntimeError('active TimerHandle is deallacating')
-
-    cdef _cancel(self):
-        if self._cancelled == 1:
-            return
-        self._cancelled = 1
-        self._clear()
-
-    cdef inline _clear(self):
-        if self.timer == NULL:
-            return
-
-        self.callback = None
-        self.args = None
-        try:
-            self.loop._timers.remove(self)
-        finally:
-            hv.htimer_del(self.timer)
-            self.timer = NULL  # let the UVTimer handle GC
-
-    cdef _run(self):
-        if self._cancelled == 1:
-            return
-
-        if self.callback is None:
-            raise RuntimeError('cannot run TimerHandle; callback is not set')
-
-
-        callback = self.callback
-        args = self.args
-
-
-        # Since _run is a cdef and there's no BoundMethod,
-        # we guard 'self' manually.
-        Py_INCREF(self)
-
-        # if self.loop._debug:
-            # started = time_monotonic()
-        try:
-            # if PY37:
-                # assert self.context is not None
-                # Context_Enter(self.context)
-
-            if args is not None:
-                callback(*args)
-            else:
-                callback()
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except BaseException as ex:
-            context = {
-                'message': 'Exception in callback {}'.format(callback),
-                'exception': ex,
-                'handle': self,
-            }
-
-            # if self._debug_info is not None:
-            #     context['source_traceback'] = self._debug_info[1]
-
-            self.loop.call_exception_handler(context)
-        else:
-            pass
-            # if self.loop._debug:
-            #     pass
-                # delta = time_monotonic() - started
-                # if delta > self.loop.slow_callback_duration:
-                #     aio_logger.warning(
-                #         'Executing %r took %.3f seconds',
-                #         self, delta)
-        finally:
-            context = self.context
-            Py_DECREF(self)
-            # if PY37:
-            #     Context_Exit(context)
-            self._clear()
-
-    # Public API
-
-    def __repr__(self):
-        info = [self.__class__.__name__]
-
-        if self._cancelled:
-            info.append('cancelled')
-
-        if self._debug_info is not None:
-            callback_name = self._debug_info[0]
-            source_traceback = self._debug_info[1]
-        else:
-            callback_name = None
-            source_traceback = None
-
-        if callback_name is not None:
-            info.append(callback_name)
-        elif self.callback is not None:
-            info.append(format_callback_name(self.callback))
-
-        if source_traceback is not None:
-            frame = source_traceback[-1]
-            info.append('created at {}:{}'.format(frame[0], frame[1]))
-
-        return '<' + ' '.join(info) + '>'
-
-    def cancelled(self):
-        return self._cancelled
-
-    def cancel(self):
-        self._cancel()
-
-
-cdef format_callback_name(func):
-    if hasattr(func, '__qualname__'):
-        cb_name = getattr(func, '__qualname__')
-    elif hasattr(func, '__name__'):
-        cb_name = getattr(func, '__name__')
-    else:
-        cb_name = repr(func)
-    return cb_name
-
-
-
-cdef void on_connect(hv.hio_t* io) with gil:
-    cdef:
-        HVSocketTransport transport = <HVSocketTransport> (<hv.hevent_t*>io).userdata
-    transport._on_connect()
-
-
-cdef void on_recv(hv.hio_t* io, void* buf, int readbytes) with gil:
-    cdef:
-        HVSocketTransport transport = <HVSocketTransport> (<hv.hevent_t*>io).userdata
-    transport._on_recv(buf, readbytes)
-
-
-@cython.no_gc_clear
-cdef class HVSocketTransport:
-
-    def __cinit__(self, Loop loop, object protocol, object server, object waiter):
-        self.loop = loop
-        self._server = server
-        self._waiter = waiter
-        self._extra_info = dict()
-
-        self._eof = 0
-        self._buffer = []
-
-        self.set_protocol(protocol)
-        self._conn_lost = 0
-        self._closing = 0
-
-
-    def __repr__(self):
-        return '<{} closed=1 {:#x}>'.format(
-            self.__class__.__name__,
-            id(self)
-        )
-
-    def __dealloc__(self):
-        pass
-
-    def get_extra_info(self, name, default=None):
-        return self._extra_info.get(name, default)
-
-    cdef void connect(self, const char* host, int port):
-        self._io = hv.hloop_create_tcp_client(self.loop.hvloop, host, port, on_connect)
-        hv.hevent_set_userdata(<hv.hevent_t*>self._io, <void*>self)
-
-        self._start_reading()
-
-    cdef _start_reading(self):
-        hv.hio_setcb_read(self._io, on_recv)
-        hv.hio_read(self._io)
-        # hv.hio_set_readbuf(self._io, self.loop._recv_buf, 8192)
-
-    cdef _on_connect(self):
-        # 填写 sockanme 和 peername
-        #todo: support ipv6
-        self._extra_info["sockname"] = convert_sockaddr_to_pyaddr(hv.hio_localaddr(self._io))
-        self._extra_info["peername"] = convert_sockaddr_to_pyaddr(hv.hio_peeraddr(self._io))
-
-        self.loop.call_soon(self._protocol.connection_made, self)
-        self._waiter.set_result(True)
-
-    cdef _on_recv(self, void *buf, int n):
-        cdef bytes py_bytes
-        try:
-            py_bytes = (<char*>buf)[:n]
-            self._protocol.data_received(py_bytes)
-        except BaseException as exc:
-            self._fatal_error(exc)
-
-    cdef _write(self, object data):
-        pass
-
-    def write(self, object data):
-        if not isinstance(data, (bytes, bytearray, memoryview)):
-            raise TypeError('data argument must be a bytes-like object, not {}'.format(type(data).__name__))
-
-        if not data:
-            return
-
-        cdef:
-            void* buf
-            size_t blen
-
-        buf = <void*>PyBytes_AS_STRING(data)
-        blen = Py_SIZE(data)
-        n = hv.hio_write(self._io, buf, blen)
-        if n < 0:
-            exc = Exception()
-            self._fatal_error()
-            raise exc
-        else:
-            aio_logger.info("send: %s, buf: %s", n, blen)
-            data = data[n:]
-            if not data:
-                return
-
-        self._buffer.extend(data)
-        self._maybe_pause_protocol()
-
-    def get_protocol(self):
-        return self._protocol
-
-    def set_protocol(self, protocol):
-        self._protocol = protocol
-
-    def writelines(self, list_of_data):
-        data = b''.join(list_of_data)
-        self.write(data)
-
-    def write_eof(self):
-        self._eof = 1
-
-    def can_write_eof(self):
-        return True
-
-    # flow control
-    cdef inline _maybe_pause_protocol(self):
-        cdef:
-            size_t size = self._get_write_buffer_size()
-        if size <= self._high_water:
-            return
-
-        if not self._protocol_paused:
-            self._protocol_paused = 1
-            try:
-                self._protocol.pause_writing()
-            except (SystemExit, KeyboardInterrupt):
-                raise
-            except BaseException as exc:
-                self._loop.call_exception_handler({
-                    'message': 'protocol.pause_writing() failed',
-                    'exception': exc,
-                    'transport': self,
-                    'protocol': self._protocol,
-                })
-
-    cdef inline _maybe_resume_protocol(self):
-        cdef:
-            size_t size = self._get_write_buffer_size()
-        if (self._protocol_paused and
-            size <= self._low_water):
-            self._protocol_paused = 0
-            try:
-                self._protocol.resume_writing()
-            except (SystemExit, KeyboardInterrupt):
-                raise
-            except BaseException as exc:
-                self._loop.call_exception_handler({
-                    'message': 'protocol.resume_writing() failed',
-                    'exception': exc,
-                    'transport': self,
-                    'protocol': self._protocol,
-                })
-
-    cdef size_t _get_write_buffer_size(self):
-        return 0
-
-    def get_write_buffer_size(self):
-        return self._get_write_buffer_size()
-
-    def _set_write_buffer_limits(self, high=None, low=None):
-        if high is None:
-            if low is None:
-                high = 64 * 1024
-            else:
-                high = 4 * low
-        if low is None:
-            low = high // 4
-
-        if not high >= low >= 0:
-            raise ValueError('high ({}) must be >= low ({}) must be >= 0'.format(high, low))
-        self._high_water = high
-        self._low_water = low
-
-    def set_writer_buffer_limits(self, high=None, low=None):
-        self._set_write_buffer_limits(high, low)
-        self._maybe_pause_protocol()
-
-    def get_writer_buffer_limits(self):
-        return (self._low_water, self._high_water)
-
-    def pause_reading(self):
-        pass
-
-    def resume_reading(self):
-        pass
-
-    def is_closing(self):
-        return self._closing
-
-    def close(self):
-        self._closing = 1
-
-    def abort(self):
-        pass
-
-    def _fatal_error(self, exc, message='Fatal error on transport'):
-        # Should be called from exception handler only.
-        if isinstance(exc, OSError):
-            pass
-            # if self._loop.get_debug():
-                # logger.debug("%r: %s", self, message, exc_info=True)
-        else:
-            self._loop.call_exception_handler({
-                'message': message,
-                'exception': exc,
-                'transport': self,
-                'protocol': self._protocol,
-            })
-        self._force_close(exc)
-
-    def _force_close(self, exc):
-        if self._conn_lost:
-            return
-        if self._buffer:
-            self._buffer.clear()
-            # self._loop._remove_writer(self._sock_fd)
-        if not self._closing:
-            self._closing = 1
-            # self._loop._remove_reader(self._sock_fd)
-        self._conn_lost += 1
-        self._loop.call_soon(self._call_connection_lost, exc)
-
-
-
-cdef convert_sockaddr_to_pyaddr(hv.sockaddr* addr):
-    cdef:
-        char buf[128]
-        hv.sockaddr_in *addr4
-        hv.sockaddr_in6 *addr6
-
-    if addr.sa_family == hv.AF_INET:
-        addr4 = <hv.sockaddr_in*>addr
-
-        hv.sockaddr_str(<hv.sockaddr_u*>addr4, buf, sizeof(buf))
-        host, port = PyUnicode_FromString(buf).rsplit(':', 1)
-        return (host, int(port))
-    elif addr.sa_family == hv.AF_INET6:
-        addr6 = <hv.sockaddr_in6*>addr
-        hv.sockaddr_str(<hv.sockaddr_u*>addr6, buf, sizeof(buf))
-        host, port = PyUnicode_FromString(buf).rsplit(':', 1)
-        return (host, port, hv.ntohl(addr6.sin6_flowinfo), addr6.sin6_scope_id)
-
-    raise RuntimeError("cannot convert sockaddr into Python object")
+include "server.pyx"
+include "transport.pyx"
+include "handle.pyx"
 

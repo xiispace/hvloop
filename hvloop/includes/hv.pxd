@@ -6,6 +6,12 @@ cdef extern from "hloop.h" nogil:
     cdef int AF_INET
     cdef int AF_INET6
     cdef int AF_UNIX
+    cdef int IPPROTO_IPV6
+    cdef int SOCK_STREAM
+    cdef int SOCK_DGRAM
+    cdef int SOL_SOCKET
+    cdef int SO_REUSEADDR
+
 
     ctypedef struct hloop_t
 
@@ -34,9 +40,6 @@ cdef extern from "hloop.h" nogil:
     ctypedef void (*hwrite_cb)   (hio_t* io, const void* buf, int writebytes)
     ctypedef void (*hclose_cb)   (hio_t* io)
 
-    sockaddr* hio_localaddr(hio_t* io)
-    sockaddr* hio_peeraddr(hio_t* io)
-
 
     hloop_t* hloop_new(int flags)
 
@@ -57,13 +60,30 @@ cdef extern from "hloop.h" nogil:
     void htimer_del(htimer_t* timer)
     void htimer_reset(htimer_t* timer)
 
-    void hio_setcb_read(hio_t* io, hread_cb read_cb)
-    void hio_setcb_write(hio_t* io, hwrite_cb write_cb)
-
     hio_t* hloop_create_tcp_client(hloop_t* loop, const char* host, int port, hconnect_cb connect_cb)
     hio_t* hloop_create_tcp_server(hloop_t* loop, const char* host, int port, haccept_cb accept_cb)
 
     # Nonblocking, poll IO events in the loop to call corresponding callback.
+    int HV_READ
+    int HV_WRITE
+    int HV_RDWR
+    hio_t * hio_get(hloop_t* loop, int fd)
+    int hio_add(hio_t* io, hio_cb cb, int events)
+    int hio_del(hio_t* io, int events)
+
+    # hio_t fields
+    int hio_fd(hio_t* io)
+    int hio_error(hio_t* io)
+    sockaddr* hio_localaddr(hio_t* io)
+    sockaddr* hio_peeraddr(hio_t* io)
+
+    # set callbacks
+    void hio_setcb_read(hio_t* io, hread_cb read_cb)
+    void hio_setcb_write(hio_t* io, hwrite_cb write_cb)
+    void hio_setcb_accept(hio_t* io, haccept_cb accept_cb)
+    void hio_setcb_connect(hio_t* io, hconnect_cb connect_cb)
+    void hio_setcb_close(hio_t* io, hclose_cb close_cb)
+
     # hio_add(io, HV_READ) => accept => haccept_cb
     int hio_accept (hio_t* io)
     # connect => hio_add(io, HV_WRITE) => hconnect_cb
@@ -74,6 +94,10 @@ cdef extern from "hloop.h" nogil:
     int hio_write  (hio_t* io, const void* buf, size_t len)
     # hio_del(io, HV_RDWR) => close => hclose_cb
     int hio_close  (hio_t* io)
+
+    int hio_read_start(hio_t* io)  # same as hio_read
+
+
 
 
     #------------------high-level apis-------------------------------------------
@@ -88,11 +112,18 @@ cdef extern from "hloop.h" nogil:
     # hio_get -> hio_setcb_accept -> hio_accept
     hio_t* haccept  (hloop_t* loop, int listenfd, haccept_cb accept_cb)
     # hio_get -> hio_setcb_connect -> hio_connect
-    hio_t* hconnect (hloop_t* loop, int connfd,   hconnect_cb connect_cb)
+    hio_t* hconnect (hloop_t* loop, int connfd, hconnect_cb connect_cb)
     # hio_get -> hio_set_readbuf -> hio_setcb_read -> hio_read
     hio_t* hrecv    (hloop_t* loop, int connfd, void* buf, size_t len, hread_cb read_cb)
     # hio_get -> hio_setcb_write -> hio_write
     hio_t* hsend    (hloop_t* loop, int connfd, const void* buf, size_t len, hwrite_cb write_cb)
+
+
+    #hevent.h
+    void hio_init(hio_t* io)
+    int hio_read(hio_t* io)
+    void hio_done(hio_t* io)
+    void hio_free(hio_t* io)
 
 
 ctypedef enum hv_run_flag:
@@ -135,3 +166,5 @@ cdef extern from "hsocket.h" nogil:
     int sockaddr_set_ipport(sockaddr_u* addr, const char* host, int port)
     socklen_t sockaddr_len(sockaddr_u* addr)
     const char* sockaddr_str(sockaddr_u* addr, char* buf, int len)
+
+
