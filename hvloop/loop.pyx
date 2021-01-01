@@ -244,10 +244,17 @@ cdef class Loop:
     def time(self):
         return self._time() / 1000
 
+
     # thread interaction
+    cdef _wake_up(self):
+        cdef hv.hevent_t ev
+        memset(&ev, 0, sizeof(ev))
+        hv.hloop_post_event(self.hvloop, &ev)
+
     def call_soon_threadsafe(self, callback, *args, context=None):
-        # todo: check
         handle = self._call_soon(callback, args, context)
+        #hvloop has inner socketpair, use it
+        self._wake_up()
         return handle
 
     def run_in_executor(self, executor, func, *args):
@@ -553,7 +560,7 @@ cdef class Loop:
                                      exc_info=True)
 
 
-    # debug mode
+    # debug mode todo:
     def get_debug(self):
         return self._debug
 

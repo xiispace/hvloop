@@ -67,6 +67,9 @@ cdef extern from "hloop.h" nogil:
     int HV_READ
     int HV_WRITE
     int HV_RDWR
+
+    void hloop_post_event(hloop_t* loop, hevent_t* ev)
+
     hio_t * hio_get(hloop_t* loop, int fd)
     int hio_add(hio_t* io, hio_cb cb, int events)
     int hio_del(hio_t* io, int events)

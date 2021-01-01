@@ -31,7 +31,7 @@ cdef class Loop:
     cdef _make_socket_transport(self,int sock, object protocol, object waiter, object extra, object server)
     cdef _make_hio_transport(self, hv.hio_t* hio, protocol, waiter, extra, server)
     cdef uint64_t _time(self)
-
+    cdef _wake_up(self)
 
 
 
