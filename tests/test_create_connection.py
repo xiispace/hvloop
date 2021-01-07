@@ -26,7 +26,7 @@ class EchoProtocol(asyncio.Protocol):
     def eof_received(self):
         return super().eof_received()
 
-    async def get_echo(self, data, waiter):
+    async def echo(self, data, waiter):
         self.future = waiter
         self.transport.write(data)
         return await waiter
@@ -87,7 +87,7 @@ class TestCreateConnection(unittest.TestCase):
                 EchoProtocol, sock=sock
             )
             waiter = loop.create_future()
-            return await protocol.get_echo(data, waiter)
+            return await protocol.echo(data, waiter)
 
         resp = loop.run_until_complete(send_to_echo(msg))
         assert resp == msg

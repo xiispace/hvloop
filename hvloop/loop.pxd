@@ -28,7 +28,8 @@ cdef class Loop:
 
     cdef _run(self, int flags)
     cdef inline _call_soon(self, object callback, object args, object context)
-    cdef _make_socket_transport(self,int sock, object protocol, object waiter, object extra, object server)
+    cdef _make_socket_transport(self, object sock, object protocol, object waiter, object extra, object server)
+    cdef _make_datagram_transport(self, object sock, object protocol, object address, object waiter, object extra)
     cdef _make_hio_transport(self, hv.hio_t* hio, protocol, waiter, extra, server)
     cdef uint64_t _time(self)
     cdef _wake_up(self)

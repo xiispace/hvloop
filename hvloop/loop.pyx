@@ -1,5 +1,6 @@
 # cython: language_level=3, embedsignature=True
 import os
+import stat
 import sys
 import asyncio
 import concurrent.futures
@@ -7,6 +8,7 @@ import collections
 import traceback
 import socket
 import itertools
+import warnings
 
 cimport cython
 from cython.operator cimport dereference as deref
@@ -54,6 +56,7 @@ cdef socket_error = socket_error
 
 cdef col_deque = collections.deque
 cdef col_Iterable = collections.abc.Iterable
+cdef warnings_warn = warnings.warn
 
 cdef chain_from_iterable = itertools.chain.from_iterable
 
@@ -79,6 +82,9 @@ cdef void on_idle(hv.hidle_t* idle) with gil:
 
     if loop._stopping:
         hv.hloop_stop(loop.hvloop)
+
+
+_unset = object()
 
 
 @cython.no_gc_clear
@@ -271,9 +277,11 @@ cdef class Loop:
         self._default_executor = executor
 
     # internet name lookups
-    cdef _make_socket_transport(self, int sock, protocol, waiter, extra, server):
+    cdef _make_socket_transport(self, sock, protocol, waiter, extra, server):
         cdef hv.hio_t* hio = hv.hio_get(self.hvloop, sock)
-        return self._make_hio_transport(hio, protocol, waiter, extra, server)
+        tr = self._make_hio_transport(hio, protocol, waiter, extra, server)
+        tr._attach_fileobj(sock)
+        return tr
 
     cdef _make_hio_transport(self, hv.hio_t* hio, protocol, waiter, extra, server):
         tr = HVSocketTransport(self, protocol, waiter, extra, server)
@@ -327,7 +335,7 @@ cdef class Loop:
         else:
             if sock is None:
                 raise ValueError('host and port was not specified and no sock specified')
-            transport = self._make_socket_transport(sock.fileno(), protocol, waiter, None, None)
+            transport = self._make_socket_transport(sock, protocol, waiter, None, None)
             await waiter
 
         return transport, protocol
@@ -453,8 +461,173 @@ cdef class Loop:
             aio_logger.info("%r is serving", server)
         return server
 
-    def create_datagram_endpoint(self):
-        pass
+    cdef _make_datagram_transport(self, object sock, protocol,
+                                 address, waiter, extra):
+
+        tr = DatagramTransport(self, protocol, address, waiter, extra)
+        cdef hv.hio_t* hio
+        hio = hv.hio_get(self.hvloop, sock.fileno())
+        cdef hv.sockaddr_u peeraddr
+        memset(&peeraddr, 0, sizeof(peeraddr))
+        if address:
+            hv.sockaddr_set_ipport(&peeraddr, address[0].encode("ascii"), address[1])
+            hv.hio_set_peeraddr(hio, &peeraddr.sa, hv.sockaddr_len(&peeraddr))
+
+        tr._init_hio(hio)
+        tr._on_connect()
+        tr._attach_fileobj(sock)
+        return tr
+
+    async def create_datagram_endpoint(self, protocol_factory,
+                                 local_addr=None, remote_addr=None, *,
+                                 family=0, proto=0, flags=0,
+                                 reuse_address=_unset, reuse_port=None,
+                                 allow_broadcast=None, sock=None):
+        if sock is not None:
+            if sock.type != socket.SOCK_DGRAM:
+                raise ValueError(
+                    f'A UDP Socket was expected, got {sock!r}')
+            if (local_addr or remote_addr or
+                    family or proto or flags or
+                    reuse_port or allow_broadcast):
+                # show the problematic kwargs in exception msg
+                opts = dict(local_addr=local_addr, remote_addr=remote_addr,
+                            family=family, proto=proto, flags=flags,
+                            reuse_address=reuse_address, reuse_port=reuse_port,
+                            allow_broadcast=allow_broadcast)
+                problems = ', '.join(f'{k}={v}' for k, v in opts.items() if v)
+                raise ValueError(
+                    f'socket modifier keyword arguments can not be used '
+                    f'when sock is specified. ({problems})')
+            sock.setblocking(False)
+            r_addr = None
+        else:
+            if not (local_addr or remote_addr):
+                if family == 0:
+                    raise ValueError('unexpected address family')
+                addr_pairs_info = (((family, proto), (None, None)),)
+            elif hasattr(socket, 'AF_UNIX') and family == socket.AF_UNIX:
+                for addr in (local_addr, remote_addr):
+                    if addr is not None and not isinstance(addr, str):
+                        raise TypeError('string is expected')
+
+                if local_addr and local_addr[0] not in (0, '\x00'):
+                    try:
+                        if stat.S_ISSOCK(os.stat(local_addr).st_mode):
+                            os.remove(local_addr)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as err:
+                        # Directory may have permissions only to create socket.
+                        aio_logger.error('Unable to check or remove stale UNIX '
+                                     'socket %r: %r',
+                                     local_addr, err)
+
+                addr_pairs_info = (((family, proto),
+                                    (local_addr, remote_addr)),)
+            else:
+                # join address by (family, protocol)
+                addr_infos = {}  # Using order preserving dict
+                for idx, addr in ((0, local_addr), (1, remote_addr)):
+                    if addr is not None:
+                        assert isinstance(addr, tuple) and len(addr) == 2, (
+                            '2-tuple is expected')
+
+                        infos = await self.getaddrinfo(
+                            addr[0], addr[1], family=family, type=socket.SOCK_DGRAM,
+                            proto=proto, flags=flags)
+                        if not infos:
+                            raise OSError('getaddrinfo() returned empty list')
+
+                        for fam, _, pro, _, address in infos:
+                            key = (fam, pro)
+                            if key not in addr_infos:
+                                addr_infos[key] = [None, None]
+                            addr_infos[key][idx] = address
+
+                # each addr has to have info for each (family, proto) pair
+                addr_pairs_info = [
+                    (key, addr_pair) for key, addr_pair in addr_infos.items()
+                    if not ((local_addr and addr_pair[0] is None) or
+                            (remote_addr and addr_pair[1] is None))]
+
+                if not addr_pairs_info:
+                    raise ValueError('can not get address information')
+
+            exceptions = []
+
+            # bpo-37228
+            if reuse_address is not _unset:
+                if reuse_address:
+                    raise ValueError("Passing `reuse_address=True` is no "
+                                     "longer supported, as the usage of "
+                                     "SO_REUSEPORT in UDP poses a significant "
+                                     "security concern.")
+                else:
+                    warnings_warn("The *reuse_address* parameter has been "
+                                  "deprecated as of 3.5.10 and is scheduled "
+                                  "for removal in 3.11.", DeprecationWarning,
+                                  stacklevel=2)
+
+            if reuse_port and not has_SO_REUSEPORT:
+                raise ValueError('reuse_port not supported by socket module')
+
+            for ((family, proto),
+                 (local_address, remote_address)) in addr_pairs_info:
+                sock = None
+                r_addr = None
+                try:
+                    sock = socket.socket(
+                        family=family, type=socket.SOCK_DGRAM, proto=proto)
+                    if reuse_port:
+                        sock.setsockopt(hv.SOL_SOCKET, SO_REUSEPORT, 1)
+                    if allow_broadcast:
+                        sock.setsockopt(
+                            socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                    sock.setblocking(False)
+
+                    if local_addr:
+                        sock.bind(local_address)
+                    if remote_addr:
+                        if not allow_broadcast:
+                            sock.connect(remote_address)
+                        r_addr = remote_address
+                except OSError as exc:
+                    print("os error")
+                    if sock is not None:
+                        sock.close()
+                    exceptions.append(exc)
+                except:
+                    print("os other error")
+                    if sock is not None:
+                        sock.close()
+                    raise
+                else:
+                    break
+            else:
+                raise exceptions[0]
+
+        protocol = protocol_factory()
+        waiter = self.create_future()
+        transport = self._make_datagram_transport(
+            sock, protocol, r_addr, waiter, None)
+        if self._debug:
+            if local_addr:
+                aio_logger.info("Datagram endpoint local_addr=%r remote_addr=%r "
+                            "created: (%r, %r)",
+                            local_addr, remote_addr, transport, protocol)
+            else:
+                aio_logger.debug("Datagram endpoint remote_addr=%r created: "
+                             "(%r, %r)",
+                             remote_addr, transport, protocol)
+
+        try:
+            await waiter
+        except:
+            transport.close()
+            raise
+
+        return transport, protocol
 
     # tasks and futures support
     def create_future(self):

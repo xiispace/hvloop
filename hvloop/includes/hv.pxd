@@ -12,6 +12,21 @@ cdef extern from "hloop.h" nogil:
     cdef int SOL_SOCKET
     cdef int SO_REUSEADDR
 
+    ctypedef enum hio_type_e:
+        HIO_TYPE_UNKNOWN = 0
+        HIO_TYPE_STDIN = 0x00000001
+        HIO_TYPE_STDOUT = 0x00000002
+        HIO_TYPE_STDERR = 0x00000004
+        HIO_TYPE_STDIO = 0x0000000F
+
+        HIO_TYPE_FILE = 0x00000010
+
+        HIO_TYPE_IP = 0x00000100
+        HIO_TYPE_UDP = 0x00001000
+        HIO_TYPE_TCP = 0x00010000
+        HIO_TYPE_SSL = 0x00020000
+        HIO_TYPE_SOCKET = 0x00FFFF00
+
 
     ctypedef struct hloop_t
 
@@ -26,6 +41,7 @@ cdef extern from "hloop.h" nogil:
     ctypedef struct htimeout_t
     ctypedef struct hperiod_t
     ctypedef struct hio_t:
+        hio_type_e io_type
         sockaddr* localaddr
         sockaddr* peeraddr
 
@@ -63,6 +79,9 @@ cdef extern from "hloop.h" nogil:
     hio_t* hloop_create_tcp_client(hloop_t* loop, const char* host, int port, hconnect_cb connect_cb)
     hio_t* hloop_create_tcp_server(hloop_t* loop, const char* host, int port, haccept_cb accept_cb)
 
+    hio_t* hloop_create_udp_server(hloop_t* loop, const char* host, int port)
+    hio_t* hloop_create_udp_client(hloop_t* loop, const char* host, int port)
+
     # Nonblocking, poll IO events in the loop to call corresponding callback.
     int HV_READ
     int HV_WRITE
@@ -77,8 +96,10 @@ cdef extern from "hloop.h" nogil:
     # hio_t fields
     int hio_fd(hio_t* io)
     int hio_error(hio_t* io)
+    hio_type_e hio_type(hio_t* io)
     sockaddr* hio_localaddr(hio_t* io)
     sockaddr* hio_peeraddr(hio_t* io)
+    void hio_set_peeraddr(hio_t* io, sockaddr* addr, int addrlen)
 
     # set callbacks
     void hio_setcb_read(hio_t* io, hread_cb read_cb)
@@ -123,10 +144,10 @@ cdef extern from "hloop.h" nogil:
 
 
     #hevent.h
-    void hio_init(hio_t* io)
-    int hio_read(hio_t* io)
-    void hio_done(hio_t* io)
-    void hio_free(hio_t* io)
+    # void hio_init(hio_t* io)
+    # int hio_read(hio_t* io)
+    # void hio_done(hio_t* io)
+    # void hio_free(hio_t* io)
 
 
 ctypedef enum hv_run_flag:
