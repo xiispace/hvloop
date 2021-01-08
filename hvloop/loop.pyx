@@ -123,7 +123,7 @@ cdef class Loop:
 
     def __repr__(self):
         return '<{} running={} closed={} debug={}>'.format(
-            self.__class__.__name__, self.is_running(), self.is_closed(), self.get_debug()
+            'hvloop.Loop', self.is_running(), self.is_closed(), self.get_debug()
         )
 
     # starting, stopping and closing

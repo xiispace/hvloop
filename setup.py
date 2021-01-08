@@ -62,20 +62,24 @@ ext_type = Extension(
     define_macros=[('HV_STATICLIB', '1'), ],
 )
 
+with open("README.md", "r", encoding="utf-8") as f:
+    LONG_DESCRIPTION = f.read()
 
 setup(
     name="hvloop",
-    version="0.0.1",
-    description="asyncio event loop base on libhv",
-    url="https://github.com/xiispace/hvloop",
+    version="0.0.2",
+    packages=['hvloop'],
     license="MIT License",
     author="xiispace",
     author_email="xiispace@163.com",
+    description="asyncio event loop base on libhv",
+    long_description=LONG_DESCRIPTION,
+    long_description_content_type="text/markdown",
+    url="https://github.com/xiispace/hvloop",
     classifiers=[
         'Development Status :: 1 - Planning',
         'Framework :: AsyncIO',
         'Programming Language :: Python :: 3 :: Only',
-        'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
@@ -86,7 +90,7 @@ setup(
     cmdclass={
         "build_ext": hvloop_build_ext
     },
-    python_requires=">=3.5",
+    python_requires=">=3.6",
     include_package_data=True,
     ext_modules=cythonize([ext_type], compiler_directives={'language_level': "3"})
 )
