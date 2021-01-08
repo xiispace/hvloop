@@ -1,14 +1,14 @@
 # coding:utf-8
 import os
 import platform
-import shutil
 import sys
 import subprocess
 
-from setuptools import find_packages
 from setuptools.command.build_ext import build_ext
 from distutils.core import setup, Extension
+
 from distutils import log as logger
+import Cython
 from Cython.Build import cythonize
 
 is_x64 = platform.architecture()[0] == '64bit'
@@ -23,10 +23,9 @@ class hvloop_build_ext(build_ext):
 
     def build_libhv(self):
         # cmake configure
-        cmake_args = [
-            LIBHV_DIR,
-        ]
-        if is_x64:
+        cmake_args = [LIBHV_DIR, "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"]
+
+        if is_win:
             cmake_args.append("-DCMAKE_GENERATOR_PLATFORM=x64")
 
         print(cmake_args)
@@ -46,7 +45,10 @@ class hvloop_build_ext(build_ext):
 
         self.build_libhv()
 
-        libhv_lib = os.path.join(build_dir, "lib", "Release", "hv_static.lib")
+        if is_win:
+            libhv_lib = os.path.join(build_dir, "lib", "Release", "hv_static.lib")
+        else:
+            libhv_lib = os.path.join(build_dir, "lib", "libhv_static.a")
         if not os.path.exists(libhv_lib):
             raise RuntimeError("failed to build libhv")
         self.extensions[-1].extra_objects.extend([libhv_lib])
