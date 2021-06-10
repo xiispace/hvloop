@@ -27,6 +27,7 @@ class hvloop_build_ext(build_ext):
 
         if is_win:
             cmake_args.append("-DCMAKE_GENERATOR_PLATFORM=x64")
+            cmake_args.append("-DCMAKE_GENERATOR_TOOLSET=host=x64")
 
         print(cmake_args)
 

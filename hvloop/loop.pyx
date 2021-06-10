@@ -24,20 +24,24 @@ from .includes.python cimport (
     PY_VERSION_HEX,
     PyMem_RawMalloc,
     PyMem_RawFree,
-    PyUnicode_FromString
+    PyUnicode_FromString,
+    Context_CopyCurrent,
+    Context_Enter,
+    Context_Exit,
 )
 
 cdef os_environ = os.environ
 cdef os_name = os.name
 cdef sys_platform = sys.platform
+cdef sys_getframe = sys._getframe
 cdef sys_ignore_environment = sys.flags.ignore_environment
-cdef tb_format_list = traceback.format_list
 cdef aio_logger = asyncio.log.logger
 cdef aio_Future = asyncio.Future
 cdef aio_Task = asyncio.Task
 cdef aio_ensure_future = asyncio.ensure_future
 cdef aio_isfuture = asyncio.isfuture
 cdef aio_Handle = asyncio.Handle
+cdef aio_TimerHandle = asyncio.TimerHandle
 cdef aio_wrap_future = asyncio.wrap_future
 cdef aio_gather = asyncio.gather
 cdef aio_set_running_loop = asyncio._set_running_loop
@@ -58,8 +62,13 @@ cdef col_deque = collections.deque
 cdef col_Iterable = collections.abc.Iterable
 cdef warnings_warn = warnings.warn
 
+cdef tb_StackSummary = traceback.StackSummary
+cdef tb_walk_stack = traceback.walk_stack
+cdef tb_format_list = traceback.format_list
+
 cdef chain_from_iterable = itertools.chain.from_iterable
 
+include "includes/consts.pxi"
 
 cdef:
     int PY37 = PY_VERSION_HEX >= 0x03070000
@@ -113,11 +122,11 @@ cdef class Loop:
                         and bool(os_environ.get('PYTHONASYNCIODEBUG'))))
 
     def __dealloc__(self):
-        if self._closed == 0:
-            aio_logger.warning("unclosed event loop")
+        # if self._closed == 0:
+        #     aio_logger.warning("unclosed event loop")
             # not self.is_running()
-            if self._thread_id != 0:
-                self.close()
+            # if self._thread_id != 0:
+            #     self.close()
 
         hv.hloop_free(&self.hvloop)
 
@@ -178,6 +187,7 @@ cdef class Loop:
             raise
         finally:
             future.remove_done_callback(_run_until_complete_cb)
+
         if not future.done():
             raise RuntimeError('Event loop stopped before Future completed.')
 
@@ -593,12 +603,10 @@ cdef class Loop:
                             sock.connect(remote_address)
                         r_addr = remote_address
                 except OSError as exc:
-                    print("os error")
                     if sock is not None:
                         sock.close()
                     exceptions.append(exc)
                 except:
-                    print("os other error")
                     if sock is not None:
                         sock.close()
                     raise
@@ -654,7 +662,7 @@ cdef class Loop:
         if handler is not None and not callable(handler):
             return TypeError("A callable object or None is expected, ",
                              "got {!r}".format(handler))
-        return self._exception_handler
+        self._exception_handler = handler
 
     def default_exception_handler(self, context):
         """Default exception handler.

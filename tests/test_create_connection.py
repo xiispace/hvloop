@@ -63,7 +63,7 @@ class TestCreateConnection(unittest.TestCase):
                 EchoProtocol, host=self.addr[0], port=self.addr[1]
             )
             waiter = loop.create_future()
-            return await protocol.get_echo(data, waiter)
+            return await protocol.echo(data, waiter)
 
         resp = loop.run_until_complete(send_to_echo(msg))
         assert resp == msg

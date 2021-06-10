@@ -16,6 +16,7 @@ class EchoServerProtocol(asyncio.Protocol):
         self.transport = transport
 
     def data_received(self, data: bytes) -> None:
+        print("server received: %s", data)
         self.transport.write(data)
         self.transport.close()
 
