@@ -1,0 +1,141 @@
+[build-system]
+requires = [
+    "scikit-build-core>=0.5.0",
+    "cython>=3.0.0",
+    "cython-cmake>=0.2.0",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "hvloop"
+version = "0.1.0"
+description = "asyncio event loop based on libhv"
+requires-python = ">=3.8"
+dependencies = []
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "xiispace", email = "xiispace@163.com"}
+]
+keywords = ["asyncio", "event-loop", "libhv", "network"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Networking",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pre-commit",
+    "black",
+    "ruff",
+    "mypy",
+    "build",  # For building wheels/sdist
+]
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio",
+    "pytest-cov",
+]
+
+[project.urls]
+Homepage = "https://github.com/xiispace/hvloop"
+Repository = "https://github.com/xiispace/hvloop"
+Documentation = "https://github.com/xiispace/hvloop#readme"
+
+[tool.scikit-build]
+# Build optimization settings
+build.verbose = true
+# build-dir = "build/{wheel_tag}"
+
+# Parallel build configuration
+#ninja.make-fallback = true
+
+# Caching configuration
+editable.mode = "redirect"
+install.strip = false
+
+# Note: All CMake options (including libhv options) are configured in CMakeLists.txt
+
+# Source distribution configuration
+# scikit-build-core automatically includes: README, LICENSE, pyproject.toml, etc.
+sdist.include = [
+    "src/hvloop/**/*.py",       # Python files
+    "src/hvloop/**/*.pyx",      # Cython implementation
+    "src/hvloop/**/*.pxd",      # Cython definitions
+    "src/hvloop/**/*.pxi",      # Cython includes
+    "vendor/libhv/**",          # libhv source code
+    "CMakeLists.txt",           # Build configuration
+    "Makefile",                 # Convenience targets
+]
+sdist.exclude = [
+    "vendor/libhv/examples/**",
+    "vendor/libhv/unittest/**",
+    "vendor/libhv/echo-servers/**",
+    "vendor/libhv/evpp/**",
+    "vendor/libhv/docs/**"
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src/hvloop"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+]
