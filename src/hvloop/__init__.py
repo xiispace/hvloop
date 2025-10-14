@@ -10,6 +10,15 @@ class Loop(__BaseLoop, __asyncio.AbstractEventLoop):
     pass
 
 
+class EventLoopPolicy(__asyncio.DefaultEventLoopPolicy):
+    def new_event_loop(self):
+        return Loop()
+
+
+def install():
+    __asyncio.set_event_loop_policy(EventLoopPolicy())
+
+
 def new_event_loop():
     """Return a new event loop."""
     return Loop()

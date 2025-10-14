@@ -14,10 +14,10 @@ set(BUILD_EXAMPLES OFF CACHE BOOL "build examples" FORCE)
 set(BUILD_UNITTEST OFF CACHE BOOL "build unittest" FORCE)
 
 # libhv feature flags - only enable what we need
-set(WITH_EVPP ON CACHE BOOL "compile evpp" FORCE)
-set(WITH_HTTP ON CACHE BOOL "compile http" FORCE)
-set(WITH_HTTP_SERVER ON CACHE BOOL "compile http/server" FORCE)
-set(WITH_HTTP_CLIENT ON CACHE BOOL "compile http/client" FORCE)
+set(WITH_EVPP OFF CACHE BOOL "compile evpp" FORCE)
+set(WITH_HTTP OFF CACHE BOOL "compile http" FORCE)
+set(WITH_HTTP_SERVER OFF CACHE BOOL "compile http/server" FORCE)
+set(WITH_HTTP_CLIENT OFF CACHE BOOL "compile http/client" FORCE)
 set(WITH_OPENSSL OFF CACHE BOOL "with openssl library" FORCE)
 set(WITH_MQTT OFF CACHE BOOL "compile mqtt" FORCE)
 set(WITH_PROTOCOL OFF CACHE BOOL "compile protocol" FORCE)
@@ -48,7 +48,7 @@ target_link_libraries(loop PRIVATE hv_static)
 # Configure include directories
 target_include_directories(loop PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hvloop          # For .pxd files
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libhv        # For libhv headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libhv/include # For libhv headers
     ${CMAKE_CURRENT_BINARY_DIR}/vendor/libhv/include # For generated hconfig.h
 )
 

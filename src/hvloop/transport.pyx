@@ -153,7 +153,6 @@ cdef class HVSocketTransport:
             raise exc
         else:
             self._buffer_size -= n
-            aio_logger.info("send: %s, buf: %s", n, blen)
             if self._buffer_size > 0:
                 # todo: add io_close_cb, check io send error?
                 hv.hio_setcb_write(self._hio, on_data_write)
@@ -443,7 +442,6 @@ cdef class DatagramTransport:
             raise exc
         else:
             self._buffer_size -= n
-            aio_logger.info("send: %s, buf: %s", n, blen)
             if self._buffer_size > 0:
                 # todo: add io_close_cb, check io send error?
                 hv.hio_setcb_write(self._hio, on_data_write2)

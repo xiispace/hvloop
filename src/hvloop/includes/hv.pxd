@@ -2,7 +2,7 @@ from libc.stdint cimport uint32_t, uint64_t
 from posix.types cimport gid_t, uid_t
 
 
-cdef extern from "hloop.h" nogil:
+cdef extern from "hv/hloop.h" nogil:
     cdef int AF_INET
     cdef int AF_INET6
     cdef int AF_UNIX
@@ -160,7 +160,7 @@ cdef inline void hevent_set_userdata(hevent_t* ev, void* udata):
     (<hevent_t*>ev).userdata = udata
 
 
-cdef extern from "hsocket.h" nogil:
+cdef extern from "hv/hsocket.h" nogil:
     ctypedef int socklen_t
     struct sockaddr:
         unsigned short sa_family
