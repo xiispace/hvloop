@@ -6,7 +6,7 @@ hvloop is a asyncio event loop like [uvloop](https://github.com/MagicStack/uvloo
 Note: hvloop stil in dev, DON"T use for production
 
 ## Installation
-hvloop requires python3.6 or greater
+hvloop requires Python 3.10 or greater
 ```shell
 $ pip install hvloop
 ```

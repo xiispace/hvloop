@@ -1,16 +1,16 @@
 [build-system]
 requires = [
-    "scikit-build-core>=0.5.0",
-    "cython>=3.0.0",
+    "scikit-build-core>=0.10.0",
+    "cython>=3.1.0",
     "cython-cmake>=0.2.0",
 ]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "hvloop"
-version = "0.1.0"
+version = "0.2.0"
 description = "asyncio event loop based on libhv"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = []
 readme = "README.md"
 license = {text = "MIT"}
@@ -22,11 +22,10 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: AsyncIO",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -35,8 +34,8 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
-    "pytest-asyncio",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
     "pytest-cov",
     "pre-commit",
     "black",
@@ -45,8 +44,8 @@ dev = [
     "build",  # For building wheels/sdist
 ]
 test = [
-    "pytest>=7.0",
-    "pytest-asyncio",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
     "pytest-cov",
 ]
 
@@ -90,11 +89,11 @@ sdist.exclude = [
 
 [tool.black]
 line-length = 88
-target-version = ['py38']
+target-version = ['py310', 'py311', 'py312', 'py313']
 
 [tool.ruff]
 line-length = 88
-target-version = "py38"
+target-version = "py310"
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -110,13 +109,13 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-minversion = "7.0"
+minversion = "8.0"
 addopts = "-ra -q --strict-markers"
 testpaths = ["tests"]
 asyncio_mode = "auto"

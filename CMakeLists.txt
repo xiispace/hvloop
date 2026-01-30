@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25)
 project(${SKBUILD_PROJECT_NAME} LANGUAGES C)
 
 # Find Python and Cython-cmake
