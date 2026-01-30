@@ -1,9 +1,9 @@
-from .includes cimport hv
+from .includes.hv cimport hloop_t, hio_t
 from libc.stdint cimport uint32_t, uint64_t
 
 cdef class Loop:
     cdef:
-        hv.hloop_t* hvloop
+        hloop_t* hvloop
         bint _debug
         bint _closed
         bint _stopping
@@ -15,5 +15,6 @@ cdef class Loop:
 
     cdef _run(self, int flags)
     cdef uint64_t _time(self)
-    cdef _make_hio_transport(self, hv.hio_t* io, object protocol, object waiter, object extra, object server)
+    cdef _wakeup(self)
+    cdef _make_hio_transport(self, hio_t* io, object protocol, object waiter, object extra, object server)
 

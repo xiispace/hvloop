@@ -29,9 +29,9 @@ cdef:
     uint32_t INFINITE = <uint32_t>-1
 
 
-cdef void on_idle(hv.hidle_t* idle) noexcept nogil:
+cdef void on_idle(hidle_t* idle) noexcept nogil:
     with gil:
-        cdef Loop loop = <Loop>(<hv.hevent_t*>idle).userdata
+        loop = <Loop>(<hevent_t*>idle).userdata
         if loop is None:
             return
         # run ready callbacks
@@ -50,9 +50,9 @@ cdef void on_idle(hv.hidle_t* idle) noexcept nogil:
                 }
                 loop.call_exception_handler(context)
         if loop._stopping:
-            hloop_stop((<hv.hevent_t*>idle).loop)
+            hloop_stop((<hevent_t*>idle).loop)
             # delete this idle watcher once stop requested
-            hv.hidle_del(idle)
+            hidle_del(idle)
 
 
 @cython.no_gc_clear
@@ -60,7 +60,7 @@ cdef class Loop:
     """Simplified hvloop event loop"""
 
     def __cinit__(self):
-        self.hvloop = hv.hloop_new(0)
+        self.hvloop = hloop_new(0)
         self._debug = 0
         self._thread_id = 0
         self._closed = 0
@@ -75,7 +75,7 @@ cdef class Loop:
 
     def __dealloc__(self):
         if self.hvloop != NULL:
-            hv.hloop_free(&self.hvloop)
+            hloop_free(&self.hvloop)
 
     def __repr__(self):
         return '<{} running={} closed={} debug={}>'.format(
@@ -89,7 +89,7 @@ cdef class Loop:
         self._thread_id = PyThread_get_thread_ident()
 
         cdef int err
-        err = hv.hloop_run(self.hvloop)
+        err = hloop_run(self.hvloop)
 
         Py_DECREF(self)
 
@@ -99,9 +99,9 @@ cdef class Loop:
             raise ValueError("loop run error")
 
     def run_forever(self):
-        cdef hv.hidle_t* idle
-        idle = hv.hidle_add(self.hvloop, on_idle, INFINITE)
-        hv.hevent_set_userdata(<hv.hevent_t*>idle, <void*>self)
+        cdef hidle_t* idle
+        idle = hidle_add(self.hvloop, on_idle, INFINITE)
+        hevent_set_userdata(<hevent_t*>idle, <void*>self)
         return self._run(1)
 
     def run_until_complete(self, future):
@@ -148,7 +148,7 @@ cdef class Loop:
         self._ready.clear()
         # free underlying hv loop
         if self.hvloop != NULL:
-            hv.hloop_free(&self.hvloop)
+            hloop_free(&self.hvloop)
             self.hvloop = NULL
 
     def is_closed(self):
@@ -163,8 +163,8 @@ cdef class Loop:
         return handle
 
     cdef uint64_t _time(self):
-        hv.hloop_update_time(self.hvloop)
-        return hv.hloop_now_us(self.hvloop)
+        hloop_update_time(self.hvloop)
+        return hloop_now_us(self.hvloop)
 
     def time(self):
         # return seconds as float per asyncio contract
@@ -197,10 +197,10 @@ cdef class Loop:
 
     cdef _wakeup(self):
         # Posting an event to make sure idle runs promptly
-        cdef hv.hidle_t* idle = hv.hidle_add(self.hvloop, on_idle, 1)
-        hv.hevent_set_userdata(<hv.hevent_t*>idle, <void*>self)
+        cdef hidle_t* idle = hidle_add(self.hvloop, on_idle, 1)
+        hevent_set_userdata(<hevent_t*>idle, <void*>self)
 
-    cdef _make_hio_transport(self, hv.hio_t* io, object protocol, object waiter, object extra, object server):
+    cdef _make_hio_transport(self, hio_t* io, object protocol, object waiter, object extra, object server):
         cdef HVSocketTransport tr = HVSocketTransport(self, protocol, waiter, extra, server)
         tr._init_hio(io)
         return tr
@@ -280,12 +280,13 @@ cdef class Loop:
     async def create_connection(self, protocol_factory, host=None, port=None, *,
                                 ssl=None, family=0, proto=0, flags=0, sock=None,
                                 local_addr=None, server_hostname=None, ssl_handshake_timeout=None):
+        cdef hio_t* io
         waiter = self.create_future()
         protocol = protocol_factory()
         if sock is not None:
             # adopt existing connected socket
             fd = sock.fileno()
-            cdef hv.hio_t* io = hv.hio_get(self.hvloop, <int>fd)
+            io = hio_get(self.hvloop, <int>fd)
             if io == NULL:
                 raise RuntimeError('failed to adopt socket into hvloop')
             tr = HVSocketTransport(self, protocol, waiter, None, None)
@@ -328,7 +329,7 @@ cdef class Loop:
 
         if local_addr is not None and remote_addr is None:
             # UDP server
-            hio = hv.hloop_create_udp_server(self.hvloop, local_addr[0].encode('utf-8'), <int>local_addr[1])
+            hio = hloop_create_udp_server(self.hvloop, local_addr[0].encode('utf-8'), <int>local_addr[1])
             if hio == NULL:
                 raise RuntimeError('failed to create udp server')
             dt = DatagramTransport(self, proto_obj, None, waiter, None)
@@ -339,7 +340,7 @@ cdef class Loop:
 
         if remote_addr is not None and local_addr is None:
             # UDP client
-            hio = hv.hloop_create_udp_client(self.hvloop, remote_addr[0].encode('utf-8'), <int>remote_addr[1])
+            hio = hloop_create_udp_client(self.hvloop, remote_addr[0].encode('utf-8'), <int>remote_addr[1])
             if hio == NULL:
                 raise RuntimeError('failed to create udp client')
             dt = DatagramTransport(self, proto_obj, remote_addr, waiter, None)

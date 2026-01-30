@@ -1,3 +1,6 @@
+from .includes.hv cimport hio_t
+from .loop cimport Loop
+
 cdef class Server:
     cdef:
         Loop _loop
@@ -11,9 +14,9 @@ cdef class Server:
         object ssl_shutdown_timeout
         bint _serving
         int _active_count
-        hv.hio_t** _server_io_list
+        hio_t** _server_io_list
 
         list _waiters
 
     cdef _start_serving(self)
-    cdef _on_accept(self, hv.hio_t* io)
+    cdef _on_accept(self, hio_t* io)

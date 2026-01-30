@@ -1,4 +1,8 @@
 
+from .includes.hv cimport hio_t
+from .loop cimport Loop
+from .server cimport Server
+
 cdef class HVSocketTransport:
     cdef:
         object _protocol
@@ -7,7 +11,7 @@ cdef class HVSocketTransport:
 
         dict _extra_info
         Loop _loop
-        hv.hio_t* _hio
+        hio_t* _hio
         size_t _buffer_size
         size_t _high_water
         size_t _low_water
@@ -26,7 +30,7 @@ cdef class HVSocketTransport:
     # cdef void connect(self, const char* host, int port)
     # cdef _accept(self, hv.hio_t* io, object server)
 
-    cdef _init_hio(self, hv.hio_t* hio)
+    cdef _init_hio(self, hio_t* hio)
 
     cdef inline _attach_fileobj(self, object file)
     @staticmethod
@@ -57,7 +61,7 @@ cdef class DatagramTransport:
 
         dict _extra_info
         Loop _loop
-        hv.hio_t* _hio
+        hio_t* _hio
         size_t _buffer_size
         size_t _high_water
         size_t _low_water
@@ -75,7 +79,7 @@ cdef class DatagramTransport:
     # cdef void connect(self, const char* host, int port)
     # cdef _accept(self, hv.hio_t* io, object server)
 
-    cdef _init_hio(self, hv.hio_t* hio)
+    cdef _init_hio(self, hio_t* hio)
 
     cdef inline _attach_fileobj(self, object file)
     # cdef _call_connection_made(self)

@@ -1,7 +1,6 @@
 
 cdef void on_timer(hv.htimer_t* timer) with gil:
-    cdef:
-        TimerHandle handle = <TimerHandle> (<hv.hevent_t*>timer).userdata
+    cdef TimerHandle handle = <TimerHandle> (<hv.hevent_t*>timer).userdata
     handle._run()
 
 
