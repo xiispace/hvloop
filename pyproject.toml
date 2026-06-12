@@ -1,8 +1,8 @@
 [build-system]
 requires = [
-    "scikit-build-core>=0.10.0",
-    "cython>=3.1.0",
-    "cython-cmake>=0.2.0",
+    "scikit-build-core>=0.12.2",
+    "cython>=3.2.5",
+    "cython-cmake>=0.2.2",
 ]
 build-backend = "scikit_build_core.build"
 
@@ -94,6 +94,8 @@ target-version = ['py310', 'py311', 'py312', 'py313']
 [tool.ruff]
 line-length = 88
 target-version = "py310"
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings

@@ -30,30 +30,25 @@ add_subdirectory(vendor/libhv)
 # ============================================================================
 include(UseCython)
 
-# Transpile loop.pyx to C
-# Note: handle.pyx, transport.pyx, server.pyx are included in loop.pyx via cimport
-cython_transpile(
-    src/hvloop/loop.pyx
-    LANGUAGE C
-    OUTPUT_VARIABLE loop_c_source
+# Transpile the thin Cython/libhv binding to C.
+cython_transpile(src/hvloop/_core.pyx LANGUAGE C OUTPUT_VARIABLE core_c_source)
+
+# WITH_SOABI adds ABI tag (e.g., module.cpython-311-darwin.so).
+python_add_library(_core MODULE "${core_c_source}" WITH_SOABI)
+
+target_link_libraries(_core PRIVATE hv_static)
+
+target_include_directories(_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hvloop
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libhv/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libhv/include/hv
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libhv/base
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libhv/event
+    ${CMAKE_CURRENT_BINARY_DIR}/vendor/libhv/include
+    ${CMAKE_CURRENT_BINARY_DIR}/vendor/libhv/include/hv
 )
 
-# Create Python extension module
-# WITH_SOABI adds the ABI tag (e.g., loop.cpython-311-darwin.so)
-python_add_library(loop MODULE "${loop_c_source}" WITH_SOABI)
-
-# Link with libhv static library
-target_link_libraries(loop PRIVATE hv_static)
-
-# Configure include directories
-target_include_directories(loop PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/hvloop          # For .pxd files
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/libhv/include # For libhv headers
-    ${CMAKE_CURRENT_BINARY_DIR}/vendor/libhv/include # For generated hconfig.h
-)
-
-# Add compile definitions for static linking
-target_compile_definitions(loop PRIVATE HV_STATICLIB)
+target_compile_definitions(_core PRIVATE HV_STATICLIB)
 
 # ============================================================================
 # Installation
@@ -61,7 +56,7 @@ target_compile_definitions(loop PRIVATE HV_STATICLIB)
 # Install Python extension modules
 # scikit-build-core automatically handles the correct installation paths
 install(
-    TARGETS loop
+    TARGETS _core
     COMPONENT python_modules
     LIBRARY DESTINATION hvloop
     RUNTIME DESTINATION hvloop
