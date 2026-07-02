@@ -10,6 +10,7 @@ These are synchronous tests that construct and drive an hvloop Loop directly.
 
 import asyncio
 import importlib.util
+import sys
 import threading
 import time
 
@@ -417,6 +418,10 @@ def test_create_task_and_name(loop):
     assert loop.run_until_complete(driver()) == "ok"
 
 
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="loop.create_task(context=...) was added to asyncio in 3.11",
+)
 def test_create_task_with_context(loop):
     import contextvars
 

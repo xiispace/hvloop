@@ -17,9 +17,23 @@ if(NOT cython-cmake_FOUND)
         RESULT_VARIABLE _cython_cmake_rc
     )
     if(_cython_cmake_rc EQUAL 0 AND EXISTS "${_cython_cmake_dir}")
+        # Normalize to forward slashes. On Windows the interpreter prints a path
+        # with backslashes; once it lands in CMAKE_MODULE_PATH it gets forwarded
+        # into the compiler-ABI try_compile scratch project (re-triggered by
+        # libhv's own project() in add_subdirectory below) as a set() argument,
+        # where the backslashes are invalid escapes -> "Syntax error in cmake
+        # code ... (set)". file(TO_CMAKE_PATH) fixes that.
+        file(TO_CMAKE_PATH "${_cython_cmake_dir}" _cython_cmake_dir)
         list(PREPEND CMAKE_MODULE_PATH "${_cython_cmake_dir}")
     endif()
 endif()
+
+# libhv is built as a static library and linked into the _core Python extension
+# (a shared object). On Linux (GNU ld) a static lib linked into a .so must be
+# position-independent, else: "ld: final link failed: bad value". macOS/clang
+# doesn't require this, which is why it only surfaced on Linux CI. Set globally
+# BEFORE add_subdirectory so the hv_static target inherits it.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # ============================================================================
 # libhv Configuration
