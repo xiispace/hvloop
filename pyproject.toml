@@ -1,0 +1,200 @@
+[build-system]
+requires = [
+    "scikit-build-core>=0.12.2",
+    "cython>=3.2.5",
+    "cython-cmake>=0.2.2",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "hvloop"
+version = "0.2.0"
+description = "asyncio event loop based on libhv"
+requires-python = ">=3.10"
+dependencies = []
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "xiispace", email = "xiispace@163.com"}
+]
+keywords = ["asyncio", "event-loop", "libhv", "network"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Networking",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov",
+    "pre-commit",
+    "black",
+    "ruff",
+    "mypy",
+    "build",  # For building wheels/sdist
+]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov",
+    # M3 ASGI acceptance suite (tests/test_asgi.py). httptools is optional:
+    # its HTTP path is covered too when installed, otherwise only h11 runs.
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "websockets",
+    "httptools",
+]
+
+[project.urls]
+Homepage = "https://github.com/xiispace/hvloop"
+Repository = "https://github.com/xiispace/hvloop"
+Documentation = "https://github.com/xiispace/hvloop#readme"
+
+[tool.scikit-build]
+# Build optimization settings
+build.verbose = true
+# build-dir = "build/{wheel_tag}"
+
+# Parallel build configuration
+#ninja.make-fallback = true
+
+# Caching configuration
+editable.mode = "redirect"
+install.strip = false
+
+# Keep the wheel lean: only the package (__init__.py + compiled _core) ships.
+# Cython sources/headers are build-time inputs (present in the sdist), and
+# libhv's own install artifacts are suppressed via EXCLUDE_FROM_ALL in
+# CMakeLists.txt -- the excludes below are the second line of defense.
+wheel.exclude = [
+    "**.pyx",
+    "**.pxd",
+    "**.pxi",
+    "hvloop/hvloop_shim.h",
+    "include/**",
+    "lib/**",
+]
+
+# Note: All CMake options (including libhv options) are configured in CMakeLists.txt
+
+# Source distribution configuration
+# scikit-build-core automatically includes: README, LICENSE, pyproject.toml, etc.
+sdist.include = [
+    "src/hvloop/**/*.py",       # Python files
+    "src/hvloop/**/*.pyx",      # Cython implementation
+    "src/hvloop/**/*.pxd",      # Cython definitions
+    "src/hvloop/**/*.pxi",      # Cython includes
+    "src/hvloop/**/*.h",        # C shims (hvloop_shim.h)
+    "vendor/libhv/**",          # libhv source code (git submodule)
+    "tests/**/*.py",            # test suite
+    "tests/certs/**",           # committed TLS test certificates
+
+    "CMakeLists.txt",           # Build configuration
+    "Makefile",                 # Convenience targets
+]
+sdist.exclude = [
+    "vendor/libhv/examples/**",
+    "vendor/libhv/unittest/**",
+    "vendor/libhv/echo-servers/**",
+    "vendor/libhv/evpp/**",
+    "vendor/libhv/docs/**",
+    "__pycache__",
+    "*.pyc",
+    ".DS_Store",
+]
+
+# ----------------------------------------------------------------------------
+# cibuildwheel (M4 release pipeline, tech design section 11).
+# Matrix: CPython 3.10-3.14 x {manylinux2014 x86_64/aarch64, musllinux x86_64,
+# macOS arm64+x86_64, Windows AMD64}. The per-runner arch selection lives in
+# .github/workflows/build.yml; everything version/image related lives here.
+# ----------------------------------------------------------------------------
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+# Plan section 11 scope: no 32-bit, no PyPy, musllinux only on x86_64.
+skip = "pp* *-win32 *_i686 *-musllinux_aarch64"
+build-verbosity = 1
+# Wheel smoke tests: core suite only (pytest + pytest-asyncio). The optional
+# ASGI/TLS-uvicorn integration tests importorskip their deps and skip cleanly
+# here; the full [test] extra runs in the source-build CI job instead, keeping
+# the 25-wheel matrix independent of fastapi/uvicorn/httptools wheel
+# availability on every python/arch combination.
+test-requires = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+test-command = "pytest {project}/tests -q"
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux2014"
+manylinux-aarch64-image = "manylinux2014"
+
+[[tool.cibuildwheel.overrides]]
+# The CentOS7-based manylinux2014 images are EOL and stopped growing new
+# CPython versions; build the 3.14 wheels on manylinux_2_28 instead.
+select = "cp314-*"
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+
+[tool.black]
+line-length = 88
+target-version = ['py310', 'py311', 'py312', 'py313']
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src/hvloop"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+]
