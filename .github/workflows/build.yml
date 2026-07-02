@@ -9,6 +9,11 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Least privilege: nothing here needs to write to the repo. The upload_pypi
+# job re-declares its own permissions (id-token) for trusted publishing.
+permissions:
+  contents: read
+
 # Cancel superseded runs of the same branch/PR (a stuck queued job would
 # otherwise hold a stale run open for hours).
 concurrency:
@@ -32,6 +37,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -82,6 +88,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -114,6 +121,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:

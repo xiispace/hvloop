@@ -97,6 +97,9 @@ static inline int hvloop_sockaddr_info(struct sockaddr* sa,
     *port = 0;
     *flowinfo = 0;
     *scope_id = 0;
+    /* Families other than INET/INET6 return without writing ip; a caller that
+     * only checks for -1 must not read stale stack content as an address. */
+    if (ip != NULL && iplen > 0) ip[0] = '\0';
     if (sa == NULL) return -1;
     if (sa->sa_family == AF_INET) {
         struct sockaddr_in* sin = (struct sockaddr_in*)sa;

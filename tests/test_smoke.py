@@ -90,8 +90,11 @@ def test_event_synchronization(loop):
             await asyncio.sleep(0.02)
             ev.set()
 
-        asyncio.ensure_future(setter())
+        # Keep a strong reference: the loop only weakly tracks tasks, so an
+        # unreferenced task could in principle be GC'd before it fires (RUF006).
+        setter_task = asyncio.ensure_future(setter())
         await ev.wait()
+        await setter_task
         return "set"
 
     assert loop.run_until_complete(main()) == "set"

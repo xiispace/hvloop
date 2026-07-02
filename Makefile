@@ -1,5 +1,5 @@
 .PHONY: help install dev-install test test-cov lint format clean build \
-        configure build-ext install-ext dev-ext watch
+        configure build-ext install-ext dev-ext watch ci
 
 # Default target
 help:
@@ -13,7 +13,7 @@ help:
 	@echo "  clean        Clean build artifacts"
 	@echo "  build        Build package"
 	@echo "  configure    Configure CMake build (for incremental dev builds)"
-	@echo "  build-ext    Build Cython extension via CMake (target: loop)"
+	@echo "  build-ext    Build Cython extension via CMake (target: _core)"
 	@echo "  install-ext  Install built extension into src/ for import"
 	@echo "  dev-ext      Configure+Build+Install extension for local dev"
 	@echo "  watch        Auto-rebuild on .pyx/.pxd/.pxi changes (needs entr)"
@@ -26,7 +26,7 @@ BUILD_TYPE ?= Debug
 
 # Required by CMakeLists.txt which expects scikit-build variables
 SKBUILD_PROJECT_NAME ?= hvloop
-SKBUILD_PROJECT_VERSION ?= 0.1.0
+SKBUILD_PROJECT_VERSION ?= 0.2.0
 
 # Install prefix so that LIBRARY DESTINATION hvloop installs to src/hvloop/
 DEV_PREFIX ?= $(PWD)/src
@@ -79,12 +79,12 @@ configure:
 		-DSKBUILD_PROJECT_NAME=$(SKBUILD_PROJECT_NAME) \
 		-DSKBUILD_PROJECT_VERSION=$(SKBUILD_PROJECT_VERSION)
 
-# Build only the Cython extension target (loop)
+# Build only the Cython extension target (_core)
 build-ext:
 	@if [ ! -f "$(BUILD_DIR)/CMakeCache.txt" ]; then \
 		$(MAKE) configure; \
 	fi
-	$(CMAKE) --build $(BUILD_DIR) --config $(BUILD_TYPE) --target loop -j
+	$(CMAKE) --build $(BUILD_DIR) --config $(BUILD_TYPE) --target _core -j
 
 # Install the built extension into src/hvloop/ for immediate import
 install-ext:
