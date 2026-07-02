@@ -9,6 +9,12 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Cancel superseded runs of the same branch/PR (a stuck queued job would
+# otherwise hold a stale run open for hours).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # --------------------------------------------------------------------------
   # Source build + FULL pytest (incl. the ASGI/uvicorn/TLS integration suite)
@@ -61,7 +67,10 @@ jobs:
             os: ubuntu-24.04-arm
             archs: aarch64
           - name: macos-x86_64
-            os: macos-13              # last Intel macOS runner
+            # Intel (macos-13) runners are retired — jobs queue forever. Build
+            # x86_64 wheels by cross-compiling on the arm64 runner instead;
+            # cibuildwheel runs their tests under Rosetta 2.
+            os: macos-latest
             archs: x86_64
           - name: macos-arm64
             os: macos-latest
