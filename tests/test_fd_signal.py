@@ -260,7 +260,7 @@ def test_fd_still_usable_after_remove(loop):
         assert loop.remove_writer(b) is True
 
         # The fd is caller-owned: it must still be open and fully usable.
-        os.fstat(b.fileno())
+        b.getsockname()  # portable "still open" check (os.fstat fails on Windows sockets)
         a.send(b'alive')
         time.sleep(0.05)
         assert b.recv(100) == b'alive'
@@ -282,8 +282,8 @@ def test_fd_still_usable_after_loop_close():
         loop.add_writer(a, lambda: None)
         loop.close()
 
-        os.fstat(a.fileno())
-        os.fstat(b.fileno())
+        a.getsockname()  # portable "still open" check (os.fstat fails on Windows sockets)
+        b.getsockname()
         a.send(b'post-close')
         time.sleep(0.05)
         assert b.recv(100) == b'post-close'
